@@ -54,7 +54,7 @@ IFS=','; for CURRENTLAYERSGROUP in $LAYERSGROUPS; do
 
   # export CURRENTSVG
   inkscape --export-area-page --without-gui --export-png=$CURRENTOUTPNG $INKSCAPEARG $CURRENTSVG >> /dev/null
-  convert $CURRENTOUTPNG -flatten $CURRENTOUTPNG
+  #~ convert $CURRENTOUTPNG -flatten $CURRENTOUTPNG
 
   # increment frame idx
   FRAMEIDX=$(( $FRAMEIDX + 1 ))
