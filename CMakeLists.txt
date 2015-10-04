@@ -5,5 +5,5 @@ set(CMAKE_BUILD_TYPE Debug)
 find_package( OpenCV REQUIRED )
 find_package( Boost COMPONENTS system filesystem)
 
-add_executable( eyes_builder eyes_builder.cpp timer.h)
+add_executable( eyes_builder eyes_builder.cpp eyes_builder.h timer.h)
 target_link_libraries( eyes_builder ${OpenCV_LIBS} ${Boost_LIBRARIES})
