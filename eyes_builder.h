@@ -195,25 +195,25 @@ public:
 
   //////////////////////////////////////////////////////////////////////////////
 
-  EyeBuilder()                                { load_default_eyes();}
+  EyeBuilder()                                { load_default_imgs();}
   ~EyeBuilder() {}
-  EyeBuilder(const std::string & eyes_folder) { load_eyes(eyes_folder); }
+  EyeBuilder(const std::string & eyes_folder) { load_imgs(eyes_folder); }
   //////////////////////////////////////////////////////////////////////////////
 
-  bool load_eyes(const std::string & eyes_folder) {
-    printf("load_eyes('%s')\n", eyes_folder.c_str());
+  bool load_imgs(const std::string & eyes_folder) {
+    printf("load_imgs('%s')\n", eyes_folder.c_str());
     _states_data.clear();
     if (!boost::filesystem::exists(eyes_folder)
         || !boost::filesystem::is_directory(eyes_folder)) {
       printf("Directory '%s' doesn't exist, loading default eyes!\n", eyes_folder.c_str());
-      return load_default_eyes();
+      return load_default_imgs();
     }
     // load background RGB
     _bg = cv::imread(eyes_folder + "/bg.png", cv::IMREAD_COLOR);
     if (_bg.empty()) {
       printf("Could not load 3-channel bg image @ '%s/bg.png', loading default eyes!\n",
              eyes_folder.c_str());
-      return load_default_eyes();
+      return load_default_imgs();
     }
     _eyes.release(); // so that we create it again in redraw_eyes()
     // load iris RGBA
@@ -221,7 +221,7 @@ public:
     if (_iris.empty() || _iris.channels() != 4) {
       printf("Could not load 4-channel iris image @ '%s/iris.png', loading default eyes!\n",
              eyes_folder.c_str());
-      return load_default_eyes();
+      return load_default_imgs();
     }
     // load all states
     std::vector<std::string> states;
@@ -232,7 +232,7 @@ public:
     }
     if (_states_data.empty()) {
       printf("Could not load any state, loading default eyes!\n");
-      return load_default_eyes();
+      return load_default_imgs();
     }
 
     // safe default values
@@ -242,16 +242,16 @@ public:
         && !set_state_notransition(first_state)) {
       printf("Could not set state 'normal' nor first state '%s', loading default eyes!\n",
              first_state.c_str());
-      return load_default_eyes();
+      return load_default_imgs();
     }
     move_both_iris(0, 0);
     return redraw_eyes();
-  } // end load_eyes();
+  } // end load_imgs();
 
   //////////////////////////////////////////////////////////////////////////////
 
-  bool load_default_eyes() {
-    printf("load_default_eyes()\n");
+  bool load_default_imgs() {
+    printf("load_default_imgs()\n");
     _states_data.clear();
     int we = 100, wi = we / 2;
     _bg.create(we, we);

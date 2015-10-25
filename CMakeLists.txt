@@ -7,3 +7,5 @@ find_package( Boost COMPONENTS system filesystem)
 
 add_executable( eyes_builder eyes_builder.cpp eyes_builder.h timer.h)
 target_link_libraries( eyes_builder ${OpenCV_LIBS} ${Boost_LIBRARIES})
+add_executable( mouth_builder mouth_builder.cpp mouth_builder.h timer.h)
+target_link_libraries( mouth_builder ${OpenCV_LIBS} ${Boost_LIBRARIES})

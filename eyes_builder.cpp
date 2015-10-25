@@ -26,7 +26,7 @@ Dynamically create and move eyes.
 int main(int, char**) {
   std::string default_path = "data/mini_eyes";
   EyeBuilder b;
-  b.load_eyes(default_path);
+  b.load_imgs(default_path);
   for (int t = 0; t < 10000; ++t) {
     b.move_both_iris(cos(t/10.), sin(t/10.));
     b.redraw_eyes();
@@ -51,9 +51,9 @@ int main(int, char**) {
     else if (c == 'u')
       b.set_state("surprised");
     else if (c == 'q')
-      b.load_eyes(default_path);
+      b.load_imgs(default_path);
     else if (c == 's')
-      b.load_default_eyes();
+      b.load_default_imgs();
   }
   return 0;
 }
