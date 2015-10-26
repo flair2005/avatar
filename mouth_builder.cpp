@@ -20,19 +20,8 @@ You should have received a copy of the GNU Lesser General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 ________________________________________________________________________________
 
-Dynamically create and move mouth.
+Dynamically create and move avatar.
  */
-#include "mouth_builder.h"
-#include <opencv2/highgui/highgui.hpp>
 int main(int, char**) {
-  std::string default_path = "data/mini_mouth";
-  MouthBuilder b;
-  while(true) {
-    for (int i = 0; i < b.nleds(); ++i)
-      b.set_led_state(i, (rand()%2 ? Led::ON : Led::OFF));
-    b.redraw_mouth();
-    cv::imshow("mouth", b.get_mouth());
-    cv::waitKey(1000);
-  }
   return 0;
 }

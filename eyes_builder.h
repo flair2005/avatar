@@ -25,6 +25,9 @@ ________________________________________________________________________________
 #ifndef EYES_BUILDER_H
 #define EYES_BUILDER_H
 
+#define DEBUG_PRINT(...)   {}
+//#define DEBUG_PRINT(...)   printf(__VA_ARGS__)
+
 // utils
 #include "timer.h"
 // C++
@@ -126,7 +129,7 @@ inline int imread_all_files_in_dir(const std::string & folder,
   std::sort(filenames.begin(), filenames.end()); // alphabetical sort
   // now read images
   for (int i = 0; i < filenames.size(); ++i) {
-    //printf("filename:'%s'\n", filenames[i].c_str());
+    //DEBUG_PRINT("filename:'%s'\n", filenames[i].c_str());
     cv::Mat im = cv::imread(folder_and_slash + filenames[i], cv::IMREAD_UNCHANGED);
     if (im.empty()) {
       printf("imread_all_files_in_dir: could not read file '%s'\n", filenames[i].c_str());
@@ -144,16 +147,6 @@ inline int imread_all_files_in_dir(const std::string & folder,
            folder.c_str(), pattern.c_str());
   return ans.size();
 } // end imread_all_files_in_dir()
-
-////////////////////////////////////////////////////////////////////////////////
-
-inline void flip_vector(const cv::vector<cv::Mat4b> & in,
-                        cv::vector<cv::Mat4b> & out) {
-  unsigned int size = in.size();
-  out.resize(size);
-  for (int i = 0; i < size; ++i)
-    cv::flip(in[i], out[i], 1);
-} // end flip_vector();
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -176,32 +169,30 @@ inline T clamp(T Value, T Min, T Max) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 
-class EyeBuilder {
+class Eye {
 public:
   typedef std::string StateName;
   enum Substate { OPEN = 0, BEGIN = 2, BLINK = 3, END = 4 };
   class StateData {
   public:
     StateData() : _blink_period(3), _next_blink_time(3), _eyelid_duration(.06) {}
-    ~StateData() {/*foo.release();*/}
     StateName _name;
     double _blink_period, _eyelid_duration, _next_blink_time;
-    std::vector<cv::Mat4b> _leyelids_blink,  _leyelids_begin,  _leyelids_open;
-    std::vector<cv::Mat4b> _reyelids_blink,  _reyelids_begin,  _reyelids_open;
+    std::vector<cv::Mat4b> _eyelids_blink,  _eyelids_begin,  _eyelids_open;
     unsigned int           _neyelids_blink,  _neyelids_begin,  _neyelids_open;
-    cv::Mat4b foo;
-  };
+  }; // end class StateData
+
 
   //////////////////////////////////////////////////////////////////////////////
 
-  EyeBuilder()                                { load_default_imgs();}
-  ~EyeBuilder() {}
-  EyeBuilder(const std::string & eyes_folder) { load_imgs(eyes_folder); }
+  Eye() { load_default_imgs();}
+
   //////////////////////////////////////////////////////////////////////////////
 
   bool load_imgs(const std::string & eyes_folder) {
-    printf("load_imgs('%s')\n", eyes_folder.c_str());
+    DEBUG_PRINT("Eye::load_imgs('%s')\n", eyes_folder.c_str());
     _states_data.clear();
     if (!boost::filesystem::exists(eyes_folder)
         || !boost::filesystem::is_directory(eyes_folder)) {
@@ -209,13 +200,13 @@ public:
       return load_default_imgs();
     }
     // load background RGB
-    _bg = cv::imread(eyes_folder + "/bg.png", cv::IMREAD_COLOR);
-    if (_bg.empty()) {
-      printf("Could not load 3-channel bg image @ '%s/bg.png', loading default eyes!\n",
+    _bg = cv::imread(eyes_folder + "/bg.png", cv::IMREAD_UNCHANGED);
+    if (_bg.empty() || _bg.channels() != 4) {
+      printf("Could not load 4-channel bg image @ '%s/bg.png', loading default eyes!\n",
              eyes_folder.c_str());
       return load_default_imgs();
     }
-    _eyes.release(); // so that we create it again in redraw_eyes()
+    _force_redraw = true;
     // load iris RGBA
     _iris = cv::imread(eyes_folder + "/iris.png", cv::IMREAD_UNCHANGED);
     if (_iris.empty() || _iris.channels() != 4) {
@@ -227,7 +218,7 @@ public:
     std::vector<std::string> states;
     all_subfolders(eyes_folder, states);
     for (int i = 0; i < states.size(); ++i) {
-      printf("state:'%s'\n", states[i].c_str());
+      DEBUG_PRINT("state:'%s'\n", states[i].c_str());
       load_state(states[i], eyes_folder + "/" + states[i]);
     }
     if (_states_data.empty()) {
@@ -237,6 +228,7 @@ public:
 
     // safe default values
     _curr_statedata = NULL;
+    _curr_eyelid = NULL;
     StateName first_state = _states_data.begin()->second._name;
     if (!set_state_notransition("normal")
         && !set_state_notransition(first_state)) {
@@ -244,20 +236,19 @@ public:
              first_state.c_str());
       return load_default_imgs();
     }
-    move_both_iris(0, 0);
-    return redraw_eyes();
+    move_iris(0, 0);
+    return true;
   } // end load_imgs();
 
   //////////////////////////////////////////////////////////////////////////////
 
   bool load_default_imgs() {
-    printf("load_default_imgs()\n");
+    DEBUG_PRINT("Eye::load_default_imgs()\n");
     _states_data.clear();
     int we = 100, wi = we / 2;
     _bg.create(we, we);
-    _bg.setTo(cv::Vec3b(0,0,0));
-    cv::circle(_bg, cv::Point(we/2,we/2), we/2, cv::Scalar(255,255,255),-1);
-    _eyes.release(); // so that we create it again in redraw_eyes()
+    _bg.setTo(cv::Vec4b(0,0,0,0));
+    cv::circle(_bg, cv::Point(we/2,we/2), we/2, cv::Scalar(255,255,255,255),-1);
     _iris.create(wi, wi);
     _iris.setTo(cv::Vec4b(0,0,0,0));
     cv::circle(_iris, cv::Point(wi/2,wi/2), wi/2, cv::Scalar(50,0,00,255),-1); // blue iris
@@ -266,38 +257,47 @@ public:
     data._name = "normal";
     cv::Mat4b eyelid(we, we, cv::Vec4b(0,0,0,0));
     // normal
-    data._leyelids_begin.push_back(eyelid.clone());
-    data._reyelids_begin.push_back(eyelid.clone());
+    data._eyelids_begin.push_back(eyelid.clone());
     data._neyelids_begin = 1;
-    data._leyelids_open.push_back(eyelid.clone());
-    data._reyelids_open.push_back(eyelid.clone());
+    data._eyelids_open.push_back(eyelid.clone());
     data._neyelids_open = 1;
     for (int i = 1; i < 8; ++i) {
       eyelid.setTo(cv::Vec4b(0,0,0,0));
       cv::circle(eyelid, cv::Point(we/2,we/2), we/2, cv::Scalar(0,0,0,255),-1);
       cv::rectangle(eyelid, cv::Point(0, (i<4?i:8-i) *we/4),
                     cv::Point(we,we), cv::Scalar(0,0,0,0), -1);
-      data._leyelids_blink.push_back(eyelid.clone());
-      data._reyelids_blink.push_back(eyelid.clone());
+      data._eyelids_blink.push_back(eyelid.clone());
     }
-    data._neyelids_blink = data._leyelids_blink.size();
+    data._neyelids_blink = data._eyelids_blink.size();
     _states_data.insert(std::pair<StateName, StateData>("normal", data));
     // default values
     _curr_statedata = NULL;
-    set_state_notransition("normal");
-    move_both_iris(0, 0);
-    return redraw_eyes();
-  }
+    _curr_eyelid = NULL;
+    if (!set_state_notransition("normal")) {
+      printf("Could not set state 'normal'!\n");
+      return false;
+    }
+    move_iris(0, 0);
+    _force_redraw = true;
+    return true;
+  } // end load_default_imgs()
+
+  //////////////////////////////////////////////////////////////////////////////
+
+  cv::Size get_size() const { return _bg.size(); }
 
   //////////////////////////////////////////////////////////////////////////////
 
   bool set_state(const StateName & state) {
+    DEBUG_PRINT("Eye::set_state('%s')\n", state.c_str());
     // check state exists
-    if (_states_data.count(state) == 0)
+    if (_states_data.count(state) == 0) {
+      printf("Eye::set_state('%s'): set does not exist\n", state.c_str());
       return false;
+    }
     if (!_curr_statedata) // there was no previous state
       return set_state_notransition(state);
-    printf("Queued state '%s'\n", state.c_str());
+    DEBUG_PRINT("Queued state '%s'\n", state.c_str());
     _next_state = state; // we will need to switch to SubState END
     return true;
   }
@@ -305,75 +305,82 @@ public:
   //////////////////////////////////////////////////////////////////////////////
 
   //! irisx, irisy in [-1, 1]
-  inline void move_both_iris(double irisx, double irisy) {
-    move_left_iris(irisx, irisy);
-    move_right_iris(irisx, irisy);
-  }
-  //! irisx, irisy in [-1, 1]
-  inline void move_left_iris(double irisx, double irisy) {
-    _lirisx = clamp(irisx, -1., 1.);
-    _lirisy = clamp(irisy, -1., 1.);
-    _liris_trans.x = (1 + _lirisx) * (_bg.cols / 2 -_iris.cols / 2);
-    _liris_trans.y = (1 + _lirisy) * (_bg.rows / 2 -_iris.rows / 2);
-  }
-  //! irisx, irisy in [-1, 1]
-  inline void move_right_iris(double irisx, double irisy) {
-    _ririsx = clamp(irisx, -1., 1.);
-    _ririsy = clamp(irisy, -1., 1.);
-    _riris_trans.x = (1 + _ririsx) * (_bg.cols / 2 -_iris.cols / 2);
-    _riris_trans.y = (1 + _ririsy) * (_bg.rows / 2 -_iris.rows / 2);
+  inline void move_iris(double irisx, double irisy) {
+    DEBUG_PRINT("Eye::move_iris(%g,%g)\n", irisx, irisy);
+    _irisx = clamp(irisx, -1., 1.);
+    _irisy = clamp(irisy, -1., 1.);
+    _iris_trans.x = (1 + _irisx) * (_bg.cols / 2 -_iris.cols / 2);
+    _iris_trans.y = (1 + _irisy) * (_bg.rows / 2 -_iris.rows / 2);
+    _flip_iris_trans.x = (1 - _irisx) * (_bg.cols / 2 -_iris.cols / 2);
+    _flip_iris_trans.y = _iris_trans.y;
   }
 
   //////////////////////////////////////////////////////////////////////////////
 
-  bool redraw_eyes() {
+  bool redraw(std::vector<cv::Mat3b> & out, const std::vector<bool> & eye_flips) {
+    DEBUG_PRINT("Eye::redraw()\n");
+    if (out.empty())
+      return true;
+    unsigned int nimgs = out.size();
+    if (eye_flips.size() != nimgs) {
+      printf("Eye::redraw(): eye flips size mismatch, %i rois, %i flips!\n",
+             nimgs, eye_flips.size());
+      return false;
+    }
+
     //cv::imshow("iris", _iris); cv::waitKey(0);
-    if (_leye.empty() || _reye.empty() || _eyes.empty()) { // init images
-      _eyes.create(_bg.rows, 2 * _bg.cols);
-      _leye = _eyes(cv::Rect(0,0,_bg.cols, _bg.rows));
-      _reye = _eyes(cv::Rect(_bg.cols, 0, _bg.cols, _bg.rows));
-      _curr_leyelid = _curr_reyelid  = NULL;
+    for (int i = 0; i < nimgs; ++i) {
+      if (out[i].size() != _bg.size()) { // init images
+        printf("Eye::redraw(): size mismatch, bg=%ix%i, out=%ix%i!\n",
+               _bg.cols, _bg.rows, out[i].cols, out[i].rows);
+        return false;
+      }
+    } // end loop i
+    if (_curr_statedata == NULL) {
+      printf("Eye::redraw(): _curr_statedata undefined!\n");
+      return false;
     }
     // determine what eyelid needs to be drawn
     double time = _curr_substate_timer.getTimeSeconds();
     StateName curr_state = _curr_statedata->_name;
     unsigned int next_eyelid_idx = 1. * time / _curr_statedata->_eyelid_duration;
-    cv::Mat4b* next_leyelid = _curr_leyelid,
-        *next_reyelid = _curr_reyelid;
+    cv::Mat4b* next_eyelid = _curr_eyelid;
 
     if (_curr_substate == BEGIN) {
       // check for transitions to OPEN
       if (next_eyelid_idx < 0 || next_eyelid_idx >= _curr_statedata->_neyelids_begin) {
         if (_next_state != curr_state) { // state queued -> end the current state
-          printf("'%s':BEGIN -> END\n", curr_state.c_str());
+          DEBUG_PRINT("'%s':BEGIN -> END\n", curr_state.c_str());
           _curr_substate = END;
           _curr_substate_timer.reset();
+          next_eyelid = &(_curr_statedata->_eyelids_begin.back());
         } else { // no state queued
-          printf("'%s':BEGIN -> OPEN\n", curr_state.c_str());
+          DEBUG_PRINT("'%s':BEGIN -> OPEN\n", curr_state.c_str());
           _curr_substate = OPEN;
           _curr_substate_timer.reset();
+          next_eyelid = &(_curr_statedata->_eyelids_open.front());
         }
       }
       else { // default BEGIN animation
-        next_leyelid = &(_curr_statedata->_leyelids_begin.at(next_eyelid_idx));
-        next_reyelid = &(_curr_statedata->_reyelids_begin.at(next_eyelid_idx));
+        next_eyelid = &(_curr_statedata->_eyelids_begin.at(next_eyelid_idx));
       }
     } // end BEGIN
 
     else if (_curr_substate == OPEN) {
       // check for transitions to blink
       if (_next_state != curr_state) { // state queued -> end the current state
-        printf("'%s':OPEN -> END\n", curr_state.c_str());
+        DEBUG_PRINT("'%s':OPEN -> END\n", curr_state.c_str());
         _curr_substate = END;
         _curr_substate_timer.reset();
+        next_eyelid = &(_curr_statedata->_eyelids_begin.back());
       } else if (time > _curr_statedata->_next_blink_time) { // timeout for blink
-        printf("'%s':OPEN -> BLINK\n", curr_state.c_str());
+        DEBUG_PRINT("'%s':OPEN -> BLINK\n", curr_state.c_str());
         _curr_substate = BLINK;
         _curr_substate_timer.reset();
+        next_eyelid = &(_curr_statedata->_eyelids_blink.front());
       }
       else { // default OPEN eyelid
-        next_leyelid = &(_curr_statedata->_leyelids_open.front());
-        next_reyelid = &(_curr_statedata->_reyelids_open.front());
+        next_eyelid = &(_curr_statedata->_eyelids_open.front());
       }
     } // end OPEN
 
@@ -381,13 +388,15 @@ public:
       // check for transitions to OPEN
       if (next_eyelid_idx < 0 || next_eyelid_idx >= _curr_statedata->_neyelids_blink) {
         if (_next_state != curr_state) { // state queued -> end the current state
-          printf("'%s':BLINK -> END\n", curr_state.c_str());
+          DEBUG_PRINT("'%s':BLINK -> END\n", curr_state.c_str());
           _curr_substate = END;
           _curr_substate_timer.reset();
+          next_eyelid = &(_curr_statedata->_eyelids_begin.back());
         } else {
-          printf("'%s':BLINK -> OPEN\n", curr_state.c_str());
+          DEBUG_PRINT("'%s':BLINK -> OPEN\n", curr_state.c_str());
           _curr_substate = OPEN;
           _curr_substate_timer.reset();
+          next_eyelid = &(_curr_statedata->_eyelids_open.front());
           // gaussian probability for next blink
           double blink = .3 * rand_gaussian() + _curr_statedata->_blink_period;
           blink = std::max(blink, 1.);
@@ -395,53 +404,44 @@ public:
         }
       }
       else { // default OPEN BLINK eyelid
-        next_leyelid = &(_curr_statedata->_leyelids_blink.at(next_eyelid_idx));
-        next_reyelid = &(_curr_statedata->_reyelids_blink.at(next_eyelid_idx));
+        next_eyelid = &(_curr_statedata->_eyelids_blink.at(next_eyelid_idx));
       }
     } // end BLINK
 
     else if (_curr_substate == END) {
       if (next_eyelid_idx < 0 || next_eyelid_idx >= _curr_statedata->_neyelids_begin) {
-        printf("'%s':END -> BEGIN\n", curr_state.c_str());
+        DEBUG_PRINT("'%s':END -> BEGIN\n", curr_state.c_str());
         set_state_notransition(_next_state);
       }
       else { // default END animation = reverse BEGIN
         unsigned int idx = _curr_statedata->_neyelids_begin - 1 - next_eyelid_idx;
-        next_leyelid = &(_curr_statedata->_leyelids_begin.at(idx));
-        next_reyelid = &(_curr_statedata->_reyelids_begin.at(idx));
+        next_eyelid = &(_curr_statedata->_eyelids_begin.at(idx));
       }
     } // end END
 
-    if (next_leyelid == NULL || next_reyelid == NULL) {
+    if (next_eyelid == NULL) {
       printf("next_eyelid = NULL, something went wrong...\n");
-      _eyes.setTo(0);
+      for (int i = 0; i < nimgs; ++i)
+        out[i].setTo(0);
       return false;
     }
     // force redraw if iris has moved a lot
-    if (_curr_leyelid  == NULL
-        || cv::norm(_prev_liris_trans - _liris_trans) > 1E-2
-        || next_leyelid != _curr_leyelid) { // pointers comparison
-      overlayImage(_bg, _iris, _leye, _liris_trans);
-      overlayImage(_leye, *next_leyelid, _leye, cv::Point());
-      _curr_leyelid = next_leyelid;
-      _prev_liris_trans = _liris_trans;
-    }
-    if (_curr_reyelid  == NULL
-        || cv::norm(_prev_riris_trans - _riris_trans) > 1E-2
-        || next_reyelid != _curr_reyelid) { // pointers comparison
-      overlayImage(_bg, _iris, _reye, _riris_trans);
-      overlayImage(_reye, *next_reyelid, _reye, cv::Point());
-      _curr_reyelid = next_reyelid;
-      _prev_riris_trans = _riris_trans;
+    if (_force_redraw
+        || cv::norm(_prev_iris_trans - _iris_trans) > 1E-2
+        || next_eyelid != _curr_eyelid) { // pointers comparison
+      for (int i = 0; i < nimgs; ++i) {
+        overlayImage(out[i], _bg, out[i], cv::Point()); // use transparency
+        overlayImage(out[i], _iris, out[i], (eye_flips[i] ? _flip_iris_trans : _iris_trans));
+        overlayImage(out[i], *next_eyelid, out[i], cv::Point());
+        if (eye_flips[i])
+          cv::flip(out[i], out[i], 1);
+      }
+      _curr_eyelid = next_eyelid;
+      _prev_iris_trans = _iris_trans;
+      _force_redraw = false;
     }
     return true;
-  } // end redraw_eyes()
-
-  //////////////////////////////////////////////////////////////////////////////
-
-  inline const cv::Mat3b & get_leye() const { return _leye; }
-  inline const cv::Mat3b & get_reye() const { return _reye; }
-  inline const cv::Mat3b & get_eyes() const { return _eyes; }
+  } // end redraw()
 
   //////////////////////////////////////////////////////////////////////////////
 
@@ -450,9 +450,12 @@ protected:
   //////////////////////////////////////////////////////////////////////////////
 
   bool set_state_notransition(const StateName & state) {
+    DEBUG_PRINT("Eye::set_state_notransition('%s')\n", state.c_str());
     std::map<StateName, StateData>::iterator it = _states_data.find(state);
-    if (it == _states_data.end())
+    if (it == _states_data.end()) {
+      printf("Eye::set_state_notransition('%s'): could not set state\n", state.c_str());
       return false;
+    }
     _next_state = state;
     _curr_statedata = &(it->second);
     _curr_substate = BEGIN;
@@ -465,35 +468,263 @@ protected:
   //! load the eyelids of a given state
   inline bool load_state(const StateName & state,
                          const std::string & folder) {
+    DEBUG_PRINT("Eye::load_state('%s')\n", state.c_str());
     StateData data;
     data._name = state;
-    if (imread_all_files_in_dir(folder, data._leyelids_begin, "begin_") <= 0
-        || imread_all_files_in_dir(folder, data._leyelids_blink, "blink_") <= 0
-        || imread_all_files_in_dir(folder, data._leyelids_open, "open_") <= 0)
+    if (imread_all_files_in_dir(folder, data._eyelids_begin, "begin_") <= 0
+        || imread_all_files_in_dir(folder, data._eyelids_blink, "blink_") <= 0
+        || imread_all_files_in_dir(folder, data._eyelids_open, "open_") <= 0) {
+      printf("Eye::load_state('%s'): could not load one of the states!\n", state.c_str());
       return false;
-    data._neyelids_begin = data._leyelids_begin.size();
-    data._neyelids_blink = data._leyelids_blink.size();
-    data._neyelids_open = data._leyelids_open.size();
-    // flip for right eye
-    flip_vector(data._leyelids_begin, data._reyelids_begin);
-    flip_vector(data._leyelids_blink, data._reyelids_blink);
-    flip_vector(data._leyelids_open, data._reyelids_open);
+    }
+    data._neyelids_begin = data._eyelids_begin.size();
+    data._neyelids_blink = data._eyelids_blink.size();
+    data._neyelids_open = data._eyelids_open.size();
     _states_data.insert(std::pair<StateName, StateData>(state, data));
     return true;
   }
 
-  double _lirisx, _lirisy, _ririsx, _ririsy;
-  cv::Point _liris_trans, _prev_liris_trans, _riris_trans, _prev_riris_trans;
-  cv::Mat4b _iris;
-  cv::Mat3b _bg, _leye, _reye, _eyes;
-  cv::Mat4b *_curr_leyelid, *_curr_reyelid; //!< pointer to the current eyelid frame
+  //////////////////////////////////////////////////////////////////////////////
+
+  double _irisx, _irisy;
+  cv::Point _iris_trans, _flip_iris_trans, _prev_iris_trans;
+  cv::Mat4b _iris, _bg;
+  bool _force_redraw;
+  cv::Mat4b *_curr_eyelid; //!< pointer to the current eyelid frame
   Substate _curr_substate;
   Timer _curr_substate_timer;
   StateData* _curr_statedata;
   StateName _next_state;
   unsigned int _curr_substate_idx;
   std::map<StateName, StateData> _states_data;
-}; // end class EyeBuilder
+}; // end class Eye
+
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+
+class Led {
+public:
+  enum State { OFF = 0, ON = 2, UNSET = 3 };
+  Led() : _state(OFF), _last_drawn_state(UNSET), _auto_mode(false) {
+    load_default_imgs();
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
+
+  inline void set_state(Led::State state) { _state = state; }
+
+  //////////////////////////////////////////////////////////////////////////////
+
+  void set_auto_mode(const double & auto_mode_thres) {
+    _auto_mode = true;
+    _auto_mode_thres = auto_mode_thres;
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
+
+  inline void unset_auto_mode() { _auto_mode = true; }
+
+  //////////////////////////////////////////////////////////////////////////////
+
+  cv::Size get_size() const { return _on_img.size(); }
+
+  //////////////////////////////////////////////////////////////////////////////
+
+  bool load_imgs(const std::string & led_folder) {
+    DEBUG_PRINT("load_imgs('%s')\n", led_folder.c_str());
+  } // end load_imgs();
+
+  //////////////////////////////////////////////////////////////////////////////
+
+  inline void set_auto_mode_value(double auto_mode_value) {
+    // apply thres if needed
+    if (_auto_mode)
+      _state = (auto_mode_value > _auto_mode_thres ? ON : OFF);
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
+
+  bool redraw(cv::Mat3b & out) {
+    DEBUG_PRINT("Led::redraw()\n");
+    if (_state == _last_drawn_state) {
+      DEBUG_PRINT("Led::redraw(): nothing to do!\n");
+      return true; // nothing to do
+    }
+    cv::Mat4b* to_copy = (_state == OFF ? &_off_img : &_on_img);
+    if (out.empty() || to_copy->size() != out.size()){
+      printf("Led::redraw(): size mismatch!\n");
+      return false;
+    }
+    overlayImage(out, *to_copy, out, cv::Point()); // use transparency
+    _state = _last_drawn_state;
+    return true;
+  } // end redraw();
+
+  //////////////////////////////////////////////////////////////////////////////
+
+protected:
+  void load_default_imgs() {
+    _off_img.create(32, 32);
+    _off_img.setTo(cv::Vec4b(0,0,0,0));
+    _off_img.copyTo(_on_img);
+    cv::circle(_off_img, cv::Point(16, 16), 16, cv::Scalar(0,0,0,255),  -1);
+    cv::circle(_on_img,  cv::Point(16, 16), 16, cv::Scalar(255,0,0,255),-1);
+  }
+
+  State _state, _last_drawn_state;
+  bool _auto_mode;
+  cv::Mat4b _off_img, _on_img;
+  double _auto_mode_thres; //! threshold for on/off
+}; // end class Led
+
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+
+class Avatar {
+public:
+  Avatar() {load_default_avatar();}
+
+  //////////////////////////////////////////////////////////////////////////////
+
+  inline bool add_eye(const Eye & eye, const cv::Point & center_pos,
+                      bool eye_flip = false) {
+    if (!add_roi(eye, center_pos, _eye_rois))
+      return false;
+    _eye_flips.push_back(eye_flip);
+    //_eye = eye; // add it at the end so to preserve integrity if roi out of bounds
+    return true;
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
+
+  inline bool add_led(const Led & led, const cv::Point & center_pos) {
+    if (!add_roi(led, center_pos, _led_rois))
+      return false;
+    _leds.push_back(led); // add it at the end so to preserve integrity if roi out of bounds
+    return true;
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
+
+  void load_default_avatar() {
+    DEBUG_PRINT("Avatar::load_default_avatar()\n");
+    // bg
+    unsigned int mw = 640, mh = 480, nleds = 5;
+    _bg.create(mh, mw);
+    _bg.setTo(cv::Vec3b(100,100,100));
+    _bg.copyTo(_avatar);
+    // eyes
+    _eye_rois.clear();
+    _eye_flips.clear();
+    _eye.load_default_imgs();
+    add_eye(_eye, cv::Point(  mw/3, mh/4), false);
+    add_eye(_eye, cv::Point(2*mw/3, mh/4), true);
+    // leds
+    _leds.clear();
+    _led_rois.clear();
+    for (int iled = 1; iled <= nleds; ++iled)
+      add_led(Led(), cv::Point(iled*mw/(nleds+1), 3*mh/4));
+    _avatar.release(); // so that we redraw it in redraw()
+    redraw();
+  } // end load_default_avatar();
+
+  //////////////////////////////////////////////////////////////////////////////
+
+  void configure(unsigned int w, unsigned int h) {
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
+
+  bool set_led_state(unsigned int led_idx, Led::State state){
+    if (led_idx < 0 || led_idx >= _leds.size()) {
+      printf("Avatar::set_led(): size mismatch!\n");
+      return false;
+    }
+    _leds[led_idx].set_state(state);
+    return true;
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
+
+  //! irisx, irisy in [-1, 1]
+  inline void move_iris(double irisx, double irisy) {
+    _eye.move_iris(irisx, irisy);
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
+
+  bool redraw() {
+    DEBUG_PRINT("Avatar::redraw()\n");
+    if (_avatar.empty())
+      _bg.copyTo(_avatar);
+    // eye
+    for (int i = 0; i < _eye_rois.size(); ++i) {
+      std::vector<cv::Mat3b> avatar_cuts;
+      for (int i = 0; i < _eye_rois.size(); ++i)
+        avatar_cuts.push_back(_avatar(_eye_rois[i]));
+      if (!_eye.redraw(avatar_cuts, _eye_flips)) {
+        printf("Avatar::redraw(): Eye::redraw() went wrong!\n");
+        return false;
+      }
+    }
+    // leds
+    if (!redraw_comps(_leds, _led_rois))
+      return false;
+    return true;
+  } // end redraw()
+
+  //////////////////////////////////////////////////////////////////////////////
+
+  inline const cv::Mat3b & get_avatar() const { return _avatar; }
+  inline const unsigned int neyes() const { return _eye_rois.size(); }
+  inline const unsigned int nleds() const { return _leds.size(); }
+
+protected:
+
+  //////////////////////////////////////////////////////////////////////////////
+
+  template<class _T>
+  inline bool add_roi(const _T & comp, const cv::Point & center_pos,
+                      std::vector<cv::Rect> & rois) {
+    unsigned int lh = comp.get_size().height, lw = comp.get_size().width;
+    if (center_pos.x < lw/2 || lw/2 + center_pos.x >= _avatar.cols
+        || center_pos.y < lh/2 || lh/2 + center_pos.y >= _avatar.rows) {
+      printf("Avatar::add_comp(): cannot add comp (%i,%i) at given position (%i,%i)!\n",
+             lw, lh, center_pos.x, center_pos.y);
+      return false;
+    }
+    rois.push_back(cv::Rect(center_pos.x - lw/2, center_pos.y - lh/2, lw, lh));
+    return true;
+  } // end add_comp()
+
+  //////////////////////////////////////////////////////////////////////////////
+
+  template<class _T>
+  inline bool redraw_comps(std::vector<_T> & comps,
+                           std::vector<cv::Rect> & rois) {
+    DEBUG_PRINT("Avatar::redraw_comps()\n");
+    unsigned int ncomps = comps.size();
+    if (rois.size() != ncomps) {
+      printf("Avatar::redraw_comps(): comp size mismatch!\n");
+      return false;
+    }
+    for (int icomp = 0; icomp < ncomps; ++icomp) {
+      cv::Mat3b avatar_cut = _avatar(rois[icomp]);
+      if (!comps[icomp].redraw(avatar_cut)) {
+        printf("Avatar::redraw_comps(): comp redraw() went wrong!\n");
+        return false;
+      }
+    }
+    return true;
+  } // end redraw_comps()
+
+  //////////////////////////////////////////////////////////////////////////////
+
+  cv::Mat3b _bg, _avatar;
+  std::vector<Led> _leds;
+  Eye _eye;
+  std::vector<cv::Rect> _led_rois, _eye_rois;
+  std::vector<bool> _eye_flips;
+}; // end class Avatar
 
 #endif // EYES_BUILDER_H
-

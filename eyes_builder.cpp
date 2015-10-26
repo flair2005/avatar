@@ -23,16 +23,21 @@ ________________________________________________________________________________
 Dynamically create and move eyes.
  */
 #include "eyes_builder.h"
-int main(int, char**) {
-  std::string default_path = "data/mini_eyes";
-  EyeBuilder b;
-  b.load_imgs(default_path);
+
+void test_eyes(std::string path = "") {
+  Eye b;
+  if (path.size())
+    b.load_imgs(path);
+  cv::Mat3b out(b.get_size());
+  cv::Vec3b bg_color(0,100,0);
+  out.setTo(bg_color);
+  std::vector<cv::Mat3b> out_vec;
+  std::vector<bool> flips(1, false);
+  out_vec.push_back(out);
   for (int t = 0; t < 10000; ++t) {
-    b.move_both_iris(cos(t/10.), sin(t/10.));
-    b.redraw_eyes();
-    //    cv::imshow("leye", b.get_leye());
-    //    cv::imshow("reye", b.get_reye());
-    cv::imshow("eyes", b.get_eyes());
+    b.move_iris(cos(t/10.), sin(t/10.));
+    b.redraw(out_vec, flips);
+    cv::imshow("eyes", out);
     char c = cv::waitKey(25);
     if ((int) c == 27)
       break;
@@ -50,10 +55,67 @@ int main(int, char**) {
       b.set_state("sleepy");
     else if (c == 'u')
       b.set_state("surprised");
-    else if (c == 'q')
-      b.load_imgs(default_path);
-    else if (c == 's')
+    else if (c == 'q') {
+      b.load_imgs(path);
+      out.create(b.get_size());
+      out.setTo(bg_color);
+    }
+    else if (c == 's') {
       b.load_default_imgs();
+      out.create(b.get_size());
+      out.setTo(bg_color);
+    }
+  } // end while(true)
+} // end test_eyes();
+
+////////////////////////////////////////////////////////////////////////////////
+
+void test_led() {
+  Led l;
+  cv::Mat3b out(l.get_size());
+  for (int t = 0; t < 10000; ++t) {
+    l.set_state((rand()%2 ? Led::ON : Led::OFF));
+    l.redraw(out);
+    cv::imshow("avatar", out);
+    cv::waitKey(1000);
   }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+void test_avatar() {
+  std::string default_path = "data/mini_avatar";
+  Avatar b;
+  for (int t = 0; t < 10000; ++t) {
+    for (int i = 0; i < b.nleds(); ++i)
+      b.set_led_state(i, (rand()%2 ? Led::ON : Led::OFF));
+    b.move_iris(cos(t/10.), sin(t/10.));
+    b.redraw();
+    cv::imshow("avatar", b.get_avatar());
+    cv::waitKey(50);
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+int main(int argc, char** argv) {
+  int idx = 1, choice = 1;
+  if (argc < 2) {
+    printf("%i: test_eyes()\n", idx++);
+    printf("%i: test_eyes('data/mini_eyes'')\n", idx++);
+    printf("%i: test_led()\n", idx++);
+    printf("%i: test_avatar();\n", idx++);
+    return -1;
+  }
+  choice = atoi(argv[1]);
+
+  if (choice == idx++)
+    test_eyes();
+  else if (choice == idx++)
+    test_eyes("data/mini_eyes");
+  else if (choice == idx++)
+    test_led();
+  else if (choice == idx++)
+    test_avatar();
   return 0;
 }
