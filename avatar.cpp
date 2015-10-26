@@ -1,5 +1,5 @@
 /*!
-  \file        eyes_builder.cpp
+  \file        avatar.cpp
   \author      Arnaud Ramey <arnaud.a.ramey@gmail.com>
                 -- Robotics Lab, University Carlos III of Madrid
   \date        2015/9/30
@@ -22,7 +22,7 @@ ________________________________________________________________________________
 
 Dynamically create and move eyes.
  */
-#include "eyes_builder.h"
+#include "avatar.h"
 
 void test_eyes(std::string path = "") {
   Eye b;

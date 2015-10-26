@@ -532,6 +532,7 @@ public:
 
   bool load_imgs(const std::string & led_folder) {
     DEBUG_PRINT("load_imgs('%s')\n", led_folder.c_str());
+    return false; // TODO
   } // end load_imgs();
 
   //////////////////////////////////////////////////////////////////////////////
